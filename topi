@@ -1,0 +1,45 @@
+#!/bin/bash
+
+# Enable job control so we can kill the whole process group
+set -m
+
+# Start Topi Harness in the background
+echo "🚀 Starting Topi Harness proxy and dashboard..."
+npm --prefix /Users/abhiseksingh/Desktop/topi-harness start > /tmp/topi-harness.log 2>&1 &
+TOPI_PID=$!
+
+# Ensure we cleanup the background process no matter how the script exits!
+cleanup() {
+    echo ""
+    echo "🛑 Shutting down Topi Harness..."
+    # Kill the entire process group
+    kill -TERM -$TOPI_PID 2>/dev/null || kill -TERM $TOPI_PID 2>/dev/null
+    exit 0
+}
+
+# Catch Ctrl+C (SIGINT) and terminal close (SIGTERM, EXIT)
+trap cleanup SIGINT SIGTERM EXIT
+
+# Wait for it to start
+sleep 3
+
+echo "✅ Topi Harness is running."
+echo "   Dashboard: http://localhost:5173"
+echo "   Proxy:     http://localhost:4141/v1"
+echo ""
+
+# Export standard API keys so any sub-tool can pick them up automatically
+export OPENAI_BASE_URL="http://localhost:4141/v1"
+export OPENAI_API_KEY="dummy"
+export ANTHROPIC_BASE_URL="http://localhost:4141"
+export ANTHROPIC_API_KEY="dummy"
+
+if [ $# -eq 0 ]; then
+    echo "🤖 Launching built-in interactive LLM chat..."
+    # If no arguments are passed, run the built-in interactive CLI
+    node /Users/abhiseksingh/Desktop/topi-harness/dist/cli.js
+else
+    echo "🤖 Launching command: $@"
+    # Run the command passed by the user
+    "$@"
+fi
