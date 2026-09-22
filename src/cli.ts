@@ -55,8 +55,10 @@ ${c.bold}Model hints (use in /model):${c.reset}
   openrouter   OpenRouter free tier models
   llm7         Anonymous, no key needed (fallback)
   deepseek     DeepSeek · Pay-as-you-go (very cheap)
-  kimi         Moonshot API (Kimi)
+  kimi         Moonshot API (supports k3, k2.6)
   qwen         DashScope API (Qwen)
+  ollama       Local models (100% Free & Private)
+  huggingface  HF Serverless (Llama 3, Mistral)
 `)
 }
 

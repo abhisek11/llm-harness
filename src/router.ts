@@ -5,6 +5,8 @@ import { GLMProvider } from './providers/glm'
 import { CerebrasProvider } from './providers/cerebras'
 import { OpenRouterProvider } from './providers/openrouter'
 import { LLM7Provider } from './providers/llm7'
+import { OllamaProvider } from './providers/ollama'
+import { HuggingFaceProvider } from './providers/huggingface'
 import { KimiProvider } from './providers/kimi'
 import { DeepSeekProvider } from './providers/deepseek'
 import { QwenProvider } from './providers/qwen'
@@ -17,7 +19,9 @@ export const providers: LLMProvider[] = [
   new GLMProvider(),        // 3 — GLM-4-Flash, unlimited free
   new CerebrasProvider(),   // 4 — Llama3.1 70B, 1M tokens/day
   new OpenRouterProvider(), // 5 — Multiple free models
-  new LLM7Provider(),       // 6 — Anonymous, no key needed
+  new LLM7Provider(),
+    new OllamaProvider(),
+    new HuggingFaceProvider(),       // 6 — Anonymous, no key needed
   new DeepSeekProvider(),
   new KimiProvider(),
   new QwenProvider(),

@@ -4,6 +4,7 @@ export interface Message {
 }
 
 export interface ChatOptions {
+  model?: string;
   maxTokens?: number
   temperature?: number
   stream?: boolean
