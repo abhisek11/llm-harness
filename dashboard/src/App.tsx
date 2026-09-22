@@ -132,7 +132,7 @@ function App() {
           <div className="text-gray-500 text-xs leading-relaxed">
             Enable the beta output shaper<br/>
             (TOPI HARNESS_ROLLOUT_CHANNEL=beta<br/>
-            TOPI HARNESS_OUTPUT_SHAPER=1) and run <span className="text-gray-300 bg-gray-800 px-1 rounded">headroom learn --verbosity --apply</span> to start measuring.
+            TOPI_OUTPUT_SHAPER=1) and run <span className="text-gray-300 bg-gray-800 px-1 rounded">topi learn --verbosity --apply</span> to start measuring.
           </div>
         </div>
 
