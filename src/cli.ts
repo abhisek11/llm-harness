@@ -56,7 +56,7 @@ ${c.bold}Model hints (use in /model):${c.reset}
   openrouter   OpenRouter free tier models
   llm7         Anonymous, no key needed (fallback)
   deepseek     DeepSeek · Pay-as-you-go (very cheap)
-  kimi         Moonshot API (supports k3, k2.6)
+  kimi         Moonshot API (uses k3 by default)
   qwen         DashScope API (Qwen)
   ollama       Local models (100% Free & Private)
   huggingface  HF Serverless (Llama 3, Mistral)
@@ -120,16 +120,45 @@ For complex problems, think step by step before writing code.`,
         ask(); return
       }
 
-      if (line.startsWith('/model ')) {
+      if (line.startsWith('/model')) {
         const name = line.slice(7).trim()
-        const valid = [...router.listProviders().map(p => p.name), 'auto']
-        if (valid.includes(name)) {
-          currentModel = name
-          console.log(`${c.dim}Switched to: ${name}${c.reset}`)
+        if (name) {
+          const valid = [...router.listProviders().map(p => p.name), 'auto']
+          if (valid.includes(name)) {
+            currentModel = name
+            console.log(`${c.dim}Switched to: ${name}${c.reset}`)
+          } else {
+            console.log(`${c.red}Unknown provider. Use: ${valid.join(', ')}${c.reset}`)
+          }
+          ask(); return
         } else {
-          console.log(`${c.red}Unknown provider. Use: ${valid.join(', ')}${c.reset}`)
+          rl.pause();
+          select({
+            message: 'Select a model provider:',
+            choices: [
+              { name: 'Auto (Cascade fallbacks)', value: 'auto' },
+              { name: 'Groq (Llama 3)', value: 'groq' },
+              { name: 'Gemini (Flash)', value: 'gemini' },
+              { name: 'Ollama (Local Models)', value: 'ollama' },
+              { name: 'HuggingFace (Llama 3 8B)', value: 'huggingface' },
+              { name: 'Kimi (Moonshot k3 / v3)', value: 'kimi' },
+              { name: 'Qwen (DashScope)', value: 'qwen' },
+              { name: 'DeepSeek (Coder)', value: 'deepseek' },
+              { name: 'Cerebras (Fast)', value: 'cerebras' },
+              { name: 'GLM (Zhipu)', value: 'glm' },
+              { name: 'LLM7 (Community)', value: 'llm7' }
+            ]
+          }).then((answer) => {
+            currentModel = answer;
+            console.log(`\n${c.green}✓ Switched to ${answer}${c.reset}\n`);
+            rl.resume();
+            ask();
+          }).catch(() => {
+            rl.resume();
+            ask();
+          });
+          return;
         }
-        ask(); return
       }
 
       // ── Chat ──────────────────────────────────────────────────────────────
@@ -143,13 +172,31 @@ For complex problems, think step by step before writing code.`,
 
       let fullResponse = ''
       try {
+        let spinnerTimer: NodeJS.Timeout | undefined;
+        let spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+        let spinnerIdx = 0;
+        process.stdout.write('\x1B[?25l');
+        spinnerTimer = setInterval(() => {
+          process.stdout.write(`\r\x1b[36m${spinnerFrames[spinnerIdx++ % spinnerFrames.length]}\x1b[0m Thinking...`);
+        }, 80);
+
+        let firstToken = true;
         for await (const chunk of router.chat(history, { model: currentModel })) {
+          if (firstToken) {
+            if (spinnerTimer) {
+              clearInterval(spinnerTimer);
+              spinnerTimer = undefined;
+              process.stdout.write('\r\x1b[K\x1B[?25h');
+            }
+            firstToken = false;
+          }
           process.stdout.write(chunk)
           fullResponse += chunk
         }
         process.stdout.write('\n')
         history.push({ role: 'assistant', content: fullResponse })
       } catch (err) {
+        process.stdout.write('\r\x1b[K\x1B[?25h');
         console.error(`\n${c.red}Error: ${(err as Error).message}${c.reset}`)
         history.pop()  // remove the failed user message
       }
