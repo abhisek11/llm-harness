@@ -9,10 +9,10 @@ export class KimiProvider implements LLMProvider {
 
   private baseUrl = 'https://api.moonshot.cn/v1'
 
-  get hasKey() { return !!process.env.KIMI_API_KEY }
+  get hasKey() { return !!(process.env.MOONSHOT_API_KEY || process.env.KIMI_API_KEY) }
 
   async *chat(messages: Message[], options: ChatOptions = {}): AsyncGenerator<string> {
-    const key = process.env.KIMI_API_KEY
+    const key = (process.env.MOONSHOT_API_KEY || process.env.KIMI_API_KEY)
     if (!key) throw new Error('KIMI_API_KEY not set')
 
     // Support Kimi k3 and k2.6 based on user preference, default to k3
@@ -48,7 +48,7 @@ export class KimiProvider implements LLMProvider {
     if (!this.hasKey) return false
     try {
       const res = await fetch(`${this.baseUrl}/models`, {
-        headers: { 'Authorization': `Bearer ${process.env.KIMI_API_KEY}` }
+        headers: { 'Authorization': `Bearer ${(process.env.MOONSHOT_API_KEY || process.env.KIMI_API_KEY)}` }
       })
       return (this.isHealthy = res.ok)
     } catch { return (this.isHealthy = false) }

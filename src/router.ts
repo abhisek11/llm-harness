@@ -10,6 +10,8 @@ import { HuggingFaceProvider } from './providers/huggingface'
 import { KimiProvider } from './providers/kimi'
 import { DeepSeekProvider } from './providers/deepseek'
 import { QwenProvider } from './providers/qwen'
+import { OpenAIProvider } from './providers/openai'
+import { AnthropicProvider } from './providers/anthropic'
 
 
 // Provider pool — sorted by priority (lower = preferred)
@@ -25,6 +27,8 @@ export const providers: LLMProvider[] = [
   new DeepSeekProvider(),
   new KimiProvider(),
   new QwenProvider(),
+  new OpenAIProvider(),
+  new AnthropicProvider(),
 ]
 
 export class Router {
@@ -126,11 +130,15 @@ export class Router {
       openrouter: 'OPENROUTER_API_KEY',
       llm7: '(none needed)',
       deepseek: 'DEEPSEEK_API_KEY',
-      kimi: 'KIMI_API_KEY',
-      qwen: 'QWEN_API_KEY',
+      kimi: 'MOONSHOT_API_KEY', // or KIMI_API_KEY
+      qwen: 'DASHSCOPE_API_KEY', // or QWEN_API_KEY
     }
+    if (name === 'llm7' || name === 'ollama') return true
+    if (name === 'kimi') return !!(process.env.MOONSHOT_API_KEY || process.env.KIMI_API_KEY)
+    if (name === 'qwen') return !!(process.env.DASHSCOPE_API_KEY || process.env.QWEN_API_KEY)
+    if (name === 'openai') return !!process.env.OPENAI_API_KEY
+    if (name === 'anthropic') return !!process.env.ANTHROPIC_API_KEY
     const envKey = keyMap[name]
-    if (envKey === '(none needed)') return true
     return !!process.env[envKey]
   }
 }

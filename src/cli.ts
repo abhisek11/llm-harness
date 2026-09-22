@@ -146,7 +146,9 @@ For complex problems, think step by step before writing code.`,
               { name: 'DeepSeek (Coder)', value: 'deepseek' },
               { name: 'Cerebras (Fast)', value: 'cerebras' },
               { name: 'GLM (Zhipu)', value: 'glm' },
-              { name: 'LLM7 (Community)', value: 'llm7' }
+              { name: 'LLM7 (Community)', value: 'llm7' },
+              { name: 'OpenAI (GPT-4o / Mini)', value: 'openai' },
+              { name: 'Anthropic (Claude 3.5)', value: 'anthropic' }
             ]
           }).then((answer) => {
             currentModel = answer;
