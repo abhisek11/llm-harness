@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import 'dotenv/config'
 import * as readline from 'readline'
+import { select } from '@inquirer/prompts'
 import { router } from './router'
 import { Message } from './providers/base'
 
