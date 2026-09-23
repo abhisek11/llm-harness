@@ -1,4 +1,5 @@
-import 'dotenv/config'
+import * as dotenv from 'dotenv';
+dotenv.config({ override: true });
 import express from 'express'
 import cors from 'cors'
 import morgan from 'morgan'

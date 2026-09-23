@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import 'dotenv/config'
+import * as dotenv from 'dotenv';
+dotenv.config({ override: true });
 import * as readline from 'readline'
 import { select } from '@inquirer/prompts'
 import { router } from './router'
