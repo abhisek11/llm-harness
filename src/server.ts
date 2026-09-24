@@ -4,6 +4,7 @@ import express from 'express'
 import cors from 'cors'
 import morgan from 'morgan'
 import { router, providers } from './router'
+import { scanInjection } from './security/injection'
 
 const stats = {
   totalTokensIn: 0,
@@ -58,6 +59,29 @@ app.post('/v1/chat/completions', async (req, res) => {
 
   if (!messages || !Array.isArray(messages)) {
     return res.status(400).json({ error: 'messages array required' })
+  }
+
+  // ── membra: inbound prompt-injection / jailbreak screening ────────────────
+  if ((process.env.MEMBRA_ENABLED ?? 'true') !== 'false') {
+    const userText = messages
+      .filter((m: { role: string }) => m.role === 'user')
+      .map((m: { content: string }) => m.content)
+      .join('\n')
+    const scan = scanInjection(userText)
+    const blockThreshold = Number(process.env.MEMBRA_BLOCK_THRESHOLD ?? 0.5)
+    res.set('X-Membra-Risk-Score', String(scan.score))
+    if (scan.signals.length) res.set('X-Membra-Signals', scan.signals.join(','))
+    if (scan.score >= blockThreshold) {
+      console.error(`[membra] blocked request — score ${scan.score} signals [${scan.signals.join(', ')}]`)
+      return res.status(403).json({
+        error: {
+          message: 'Request blocked by membra: prompt-injection risk score exceeded threshold',
+          type: 'membra_blocked',
+          score: scan.score,
+          signals: scan.signals,
+        },
+      })
+    }
   }
 
   stats.requests += 1;
