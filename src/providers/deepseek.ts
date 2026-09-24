@@ -2,8 +2,8 @@ import { LLMProvider, Message, ChatOptions, parseSSEStream } from './base'
 
 export class DeepSeekProvider implements LLMProvider {
   name = 'deepseek'
-  isFree = true
-  priority = 8
+  isFree = false
+  priority = 85
   isHealthy = true
   freeLimit = 'Pay-as-you-go (very cheap)'
 

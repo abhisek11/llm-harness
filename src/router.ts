@@ -21,7 +21,9 @@ export const providers: LLMProvider[] = [
   new GLMProvider(),        // 3 — GLM-4-Flash, unlimited free
   new CerebrasProvider(),   // 4 — Llama3.1 70B, 1M tokens/day
   new OpenRouterProvider(), // 5 — Multiple free models
-  new LLM7Provider(),
+  // LLM7Provider disabled: llm7.io dropped its free anonymous tier and now
+  // requires a paid key (all models are "pro"/"turbo" tier as of 2026-09).
+  // new LLM7Provider(),
     new OllamaProvider(),
     new HuggingFaceProvider(),       // 6 — Anonymous, no key needed
   new DeepSeekProvider(),
@@ -101,6 +103,9 @@ export class Router {
           yield chunk
         }
         if (hadOutput) return  // success
+        lastError = new Error('empty response (no chunks yielded)')
+        console.error(`[router] ${provider.name} failed: ${lastError.message}`)
+        this.markUnhealthy(provider.name)
       } catch (err) {
         lastError = err as Error
         console.error(`[router] ${provider.name} failed: ${lastError.message}`)

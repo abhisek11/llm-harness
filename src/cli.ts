@@ -44,7 +44,7 @@ ${c.bold}Commands:${c.reset}
   ${c.cyan}/help${c.reset}           Show this help
   ${c.cyan}/status${c.reset}         Show provider health & API keys
   ${c.cyan}/clear${c.reset}          Clear conversation history
-  ${c.cyan}/model <name>${c.reset}   Pin to a provider (groq, gemini, glm, cerebras, openrouter, llm7, auto)
+  ${c.cyan}/model <name>${c.reset}   Pin to a provider (groq, gemini, glm, cerebras, openrouter, ollama, auto)
   ${c.cyan}/models${c.reset}         List available models
   ${c.cyan}/exit${c.reset}           Exit the CLI
 
@@ -55,8 +55,7 @@ ${c.bold}Model hints (use in /model):${c.reset}
   glm          Zhipu GLM-4-Flash (Chinese + English)
   cerebras     Cerebras · Llama3.1 70B (fastest inference)
   openrouter   OpenRouter free tier models
-  llm7         Anonymous, no key needed (fallback)
-  deepseek     DeepSeek · Pay-as-you-go (very cheap)
+  deepseek     DeepSeek · Pay-as-you-go (very cheap, NOT free)
   kimi         Moonshot API (uses k3 by default)
   qwen         DashScope API (Qwen)
   ollama       Local models (100% Free & Private)
@@ -147,7 +146,6 @@ For complex problems, think step by step before writing code.`,
               { name: 'DeepSeek (Coder)', value: 'deepseek' },
               { name: 'Cerebras (Fast)', value: 'cerebras' },
               { name: 'GLM (Zhipu)', value: 'glm' },
-              { name: 'LLM7 (Community)', value: 'llm7' },
               { name: 'OpenAI (GPT-4o / Mini)', value: 'openai' },
               { name: 'Anthropic (Claude 3.5)', value: 'anthropic' }
             ]

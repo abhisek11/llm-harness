@@ -23,9 +23,10 @@ export interface LLMProvider {
 
 export function parseSSEStream(stream: NodeJS.ReadableStream): AsyncGenerator<string> {
   return (async function* () {
+    const decoder = new TextDecoder()
     let buffer = ''
     for await (const chunk of stream) {
-      buffer += chunk.toString()
+      buffer += chunk instanceof Uint8Array ? decoder.decode(chunk, { stream: true }) : chunk.toString()
       const lines = buffer.split('\n')
       buffer = lines.pop() ?? ''
       for (const line of lines) {

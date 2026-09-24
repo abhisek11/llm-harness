@@ -3,7 +3,7 @@ import { LLMProvider, Message, ChatOptions, parseSSEStream } from './base'
 export class OllamaProvider implements LLMProvider {
   name = 'ollama'
   isFree = true
-  priority = 10
+  priority = 6
   isHealthy = true
   freeLimit = 'Unlimited (Local execution)'
 

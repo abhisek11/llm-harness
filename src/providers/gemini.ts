@@ -10,7 +10,7 @@ export class GeminiProvider implements LLMProvider {
   isHealthy = true
   freeLimit = '15 RPM · 1.5K req/day · 1M tokens/min'
 
-  private model = 'gemini-2.0-flash'
+  private model = 'gemini-flash-latest'
 
   async *chat(messages: Message[], options: ChatOptions = {}): AsyncGenerator<string> {
     const key = process.env.GEMINI_API_KEY
@@ -53,9 +53,10 @@ export class GeminiProvider implements LLMProvider {
     if (!res.body) throw new Error('No response body from Gemini')
 
     // Gemini SSE format: data: {"candidates":[{"content":{"parts":[{"text":"..."}]}}]}
+    const decoder = new TextDecoder()
     let buffer = ''
-    for await (const chunk of res.body as unknown as AsyncIterable<Buffer>) {
-      buffer += chunk.toString()
+    for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+      buffer += decoder.decode(chunk, { stream: true })
       const lines = buffer.split('\n')
       buffer = lines.pop() ?? ''
       for (const line of lines) {
