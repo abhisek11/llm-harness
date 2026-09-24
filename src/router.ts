@@ -82,7 +82,11 @@ export class Router {
   /**
    * Chat with automatic fallback across providers
    */
-  async *chat(messages: Message[], options: ChatOptions & { model?: string } = {}): AsyncGenerator<string> {
+  async *chat(
+    messages: Message[],
+    options: ChatOptions & { model?: string } = {},
+    onProvider?: (name: string) => void
+  ): AsyncGenerator<string> {
     const sorted = options.model && options.model !== 'auto'
       ? [
           ...providers.filter(p => p.name === options.model?.split('/')[0]),
@@ -99,6 +103,7 @@ export class Router {
         console.error(`[router] using ${provider.name} (${provider.freeLimit})`)
         let hadOutput = false
         for await (const chunk of provider.chat(messages, options)) {
+          if (!hadOutput) onProvider?.(provider.name)
           hadOutput = true
           yield chunk
         }

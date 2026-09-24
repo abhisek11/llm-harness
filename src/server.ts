@@ -5,37 +5,7 @@ import cors from 'cors'
 import morgan from 'morgan'
 import { router, providers } from './router'
 import { scanInjection } from './security/injection'
-
-const stats = {
-  totalTokensIn: 0,
-  totalTokensOut: 0,
-  savedTokens: 0,
-  requests: 0,
-  failedRequests: 0,
-  overheadMs: 0,
-  ttfbMs: 0,
-  throughput: {
-    input: 0,
-    compression: 0,
-    forward: 0,
-    generation: 0
-  },
-  pipeline: [
-    { name: '_deep_copy', avg: '0ms', max: '1ms' },
-    { name: '_final_token_count', avg: '1ms', max: '3ms' },
-    { name: '_initial_token_count', avg: '7ms', max: '19ms' },
-    { name: 'compressor:code_aware', avg: '43ms', max: '43ms' },
-    { name: 'compressor:log', avg: '349ms', max: '1338ms', warning: true },
-    { name: 'compressor:mixed', avg: '12ms', max: '12ms' },
-  ],
-  performance: {
-    overhead: '21 - 5978ms',
-    ttfb: '0.70 - 62.34s',
-    failed: 0
-  }
-}
-
-
+import { estimateTokens, recordRequest, recordMembraBlock, getMetrics } from './metrics'
 
 const app = express()
 app.set("etag", false)
@@ -43,11 +13,8 @@ app.use(cors())
 app.use(morgan('dev'))
 app.use(express.json({ limit: '10mb' }))
 
-app.get('/api/metrics', (req, res) => {
-  res.json({
-    compressionRate: stats.totalTokensIn > 0 ? (stats.savedTokens / stats.totalTokensIn) * 100 : 0,
-    ...stats
-  })
+app.get('/api/metrics', (_req, res) => {
+  res.json(getMetrics())
 })
 
 
@@ -73,6 +40,7 @@ app.post('/v1/chat/completions', async (req, res) => {
     if (scan.signals.length) res.set('X-Membra-Signals', scan.signals.join(','))
     if (scan.score >= blockThreshold) {
       console.error(`[membra] blocked request — score ${scan.score} signals [${scan.signals.join(', ')}]`)
+      recordMembraBlock(scan.score, scan.signals)
       return res.status(403).json({
         error: {
           message: 'Request blocked by membra: prompt-injection risk score exceeded threshold',
@@ -84,31 +52,8 @@ app.post('/v1/chat/completions', async (req, res) => {
     }
   }
 
-  stats.requests += 1;
-  const estimatedTokens = JSON.stringify(messages).length / 4;
-  stats.totalTokensIn += estimatedTokens;
-  
-  // Tiered savings logic
-  const tier = (process.env.TOPI_TIER || req.headers['x-topi-tier'] || 'free').toString().toLowerCase();
-  let savingsMultiplier = 0.4; // 40% free tier default
-  if (tier === 'pro') {
-    savingsMultiplier = 0.7; // 70% pro tier
-  } else if (tier === 'enterprise') {
-    savingsMultiplier = 0.9; // 90% enterprise tier
-  }
-  
-  stats.savedTokens += estimatedTokens * savingsMultiplier;
-  
-  // Calculate dynamic throughput based on total tokens
-  stats.throughput.input = estimatedTokens > 0 ? (estimatedTokens * 2.5) : 0;
-  stats.throughput.compression = estimatedTokens > 0 ? (estimatedTokens * 3.1) : 0;
-  stats.throughput.forward = estimatedTokens > 0 ? (estimatedTokens * 1.8) : 0;
-  stats.throughput.generation = 45.5; // Base generation speed
-  
-  stats.overheadMs = Math.floor(Math.random() * 50) + 15; // Realistic 15-65ms proxy overhead
-
-
-
+  const client = (req.headers['x-client-name'] ?? req.headers['user-agent'] ?? 'unknown').toString().split('/')[0]
+  const tokensIn = estimateTokens(JSON.stringify(messages))
 
   const options = {
     model: model ?? 'auto',
@@ -125,16 +70,13 @@ app.post('/v1/chat/completions', async (req, res) => {
     const id = `chatcmpl-${Date.now()}`
     let providerUsed = 'unknown'
     const requestStartTime = Date.now()
-    let firstByte = false
+    let ttfbMs: number | null = null
+    let outputChars = 0
 
     try {
-      for await (const chunk of router.chat(messages, options)) {
-        if (!firstByte) {
-          stats.ttfbMs = Date.now() - requestStartTime;
-          stats.performance.ttfb = (stats.ttfbMs / 1000).toFixed(2) + 's';
-          firstByte = true;
-        }
-        stats.totalTokensOut += chunk.length / 4; // approximate
+      for await (const chunk of router.chat(messages, options, name => { providerUsed = name })) {
+        if (ttfbMs === null) ttfbMs = Date.now() - requestStartTime
+        outputChars += chunk.length
 
         const data = {
           id,
@@ -159,29 +101,34 @@ app.post('/v1/chat/completions', async (req, res) => {
       })}\n\n`)
       res.write('data: [DONE]\n\n')
       res.end()
+      recordRequest({
+        provider: providerUsed,
+        model: model ?? 'auto',
+        client,
+        tokensIn,
+        tokensOut: estimateTokens('x'.repeat(outputChars)),
+        ttfbMs,
+      })
     } catch (err) {
       const msg = (err as Error).message
-      stats.failedRequests++;
-      stats.performance.failed++;
+      recordRequest({ provider: providerUsed, model: model ?? 'auto', client, tokensIn, tokensOut: 0, ttfbMs, failed: true })
       res.write(`data: ${JSON.stringify({ error: { message: msg } })}\n\n`)
       res.end()
     }
   } else {
     // Non-streaming: collect all chunks
+    let providerUsed = 'unknown'
     try {
       let content = ''
       const requestStartTime = Date.now()
-      let firstByte = false
-      for await (const chunk of router.chat(messages, options)) {
-        if (!firstByte) {
-          stats.ttfbMs = Date.now() - requestStartTime;
-          stats.performance.ttfb = (stats.ttfbMs / 1000).toFixed(2) + 's';
-          firstByte = true;
-        }
-        stats.totalTokensOut += chunk.length / 4; // approximate
-
+      let ttfbMs: number | null = null
+      for await (const chunk of router.chat(messages, options, name => { providerUsed = name })) {
+        if (ttfbMs === null) ttfbMs = Date.now() - requestStartTime
         content += chunk
       }
+
+      const tokensOut = estimateTokens(content)
+      recordRequest({ provider: providerUsed, model: model ?? 'auto', client, tokensIn, tokensOut, ttfbMs })
 
       res.json({
         id: `chatcmpl-${Date.now()}`,
@@ -193,10 +140,11 @@ app.post('/v1/chat/completions', async (req, res) => {
           message: { role: 'assistant', content },
           finish_reason: 'stop',
         }],
-        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        usage: { prompt_tokens: tokensIn, completion_tokens: tokensOut, total_tokens: tokensIn + tokensOut },
       })
     } catch (err) {
-      stats.failedRequests++; stats.performance.failed++; res.status(500).json({ error: { message: (err as Error).message } })
+      recordRequest({ provider: providerUsed, model: model ?? 'auto', client, tokensIn, tokensOut: 0, ttfbMs: null, failed: true })
+      res.status(500).json({ error: { message: (err as Error).message } })
     }
   }
 })
@@ -238,20 +186,22 @@ app.post('/v1/completions', async (req, res) => {
   const messages = [{ role: 'user' as const, content: req.body.prompt ?? '' }]
   req.body = { ...req.body, messages }
   // Re-route to chat completions logic (simplified)
+  const tokensIn = estimateTokens(req.body.prompt ?? '')
+  let providerUsed = 'unknown'
   try {
     let content = ''
-      const requestStartTime = Date.now()
-      let firstByte = false
-    for await (const chunk of router.chat(messages, { model: req.body.model })) {
+    for await (const chunk of router.chat(messages, { model: req.body.model }, name => { providerUsed = name })) {
       content += chunk
     }
+    recordRequest({ provider: providerUsed, model: req.body.model ?? 'auto', client: 'legacy', tokensIn, tokensOut: estimateTokens(content), ttfbMs: null })
     res.json({
       id: `cmpl-${Date.now()}`,
       object: 'text_completion',
       choices: [{ text: content, index: 0, finish_reason: 'stop' }],
     })
   } catch (err) {
-    stats.failedRequests++; stats.performance.failed++; res.status(500).json({ error: { message: (err as Error).message } })
+    recordRequest({ provider: providerUsed, model: req.body.model ?? 'auto', client: 'legacy', tokensIn, tokensOut: 0, ttfbMs: null, failed: true })
+    res.status(500).json({ error: { message: (err as Error).message } })
   }
 })
 
