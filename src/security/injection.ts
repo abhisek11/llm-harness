@@ -24,21 +24,46 @@ const SIGNALS: Signal[] = [
   { pattern: /<\/?(system|assistant|user)>|\[INST\]|<\|im_start\|>/i, name: 'delimiter_injection', weight: 0.5 },
 ]
 
+export const SIGNAL_DESCRIPTIONS: Record<string, string> = {
+  instruction_override: 'Attempts to make the model discard its system prompt or prior instructions.',
+  role_hijack: 'Attempts to reassign the model to an unrestricted or alternate persona (jailbreak framing).',
+  prompt_extraction: 'Attempts to make the model reveal or repeat its system prompt / hidden instructions.',
+  guardrail_removal: 'Explicitly asks the model to ignore its safety limits or restrictions.',
+  obfuscation: 'Uses encoding (e.g. base64) to smuggle instructions past naive text filters.',
+  delimiter_injection: 'Injects role/chat-template delimiters to try to fake a new conversation turn.',
+}
+
+export interface SignalMatch {
+  name: string
+  weight: number
+  description: string
+  matchedText: string
+}
+
 export interface InjectionScanResult {
   score: number
   signals: string[]
+  matches: SignalMatch[]
+}
+
+function truncate(s: string, n = 80): string {
+  return s.length > n ? s.slice(0, n) + '…' : s
 }
 
 export function scanInjection(text: string | undefined | null): InjectionScanResult {
-  const signals = new Set<string>()
+  const input = text ?? ''
+  const matches: SignalMatch[] = []
+  const seenNames = new Set<string>()
   let score = 0
   for (const { pattern, name, weight } of SIGNALS) {
-    if (pattern.test(text ?? '')) {
-      signals.add(name)
+    const m = pattern.exec(input)
+    if (m) {
       score += weight
+      matches.push({ name, weight, description: SIGNAL_DESCRIPTIONS[name] ?? '', matchedText: truncate(m[0]) })
+      seenNames.add(name)
     }
   }
   // multiple weak signals still escalate, capped at 1.0
   score = Math.min(score, 1.0)
-  return { score: Math.round(score * 1000) / 1000, signals: [...signals].sort() }
+  return { score: Math.round(score * 1000) / 1000, signals: [...seenNames].sort(), matches }
 }

@@ -5,7 +5,8 @@ import cors from 'cors'
 import morgan from 'morgan'
 import { router, providers } from './router'
 import { scanInjection } from './security/injection'
-import { estimateTokens, recordRequest, recordMembraBlock, getMetrics } from './metrics'
+import { estimateTokens, recordRequest, recordMembraBlock, recordCompression, getMetrics } from './metrics'
+import { compressLogText } from './compression/logCompressor'
 
 const app = express()
 app.set("etag", false)
@@ -40,19 +41,35 @@ app.post('/v1/chat/completions', async (req, res) => {
     if (scan.signals.length) res.set('X-Membra-Signals', scan.signals.join(','))
     if (scan.score >= blockThreshold) {
       console.error(`[membra] blocked request — score ${scan.score} signals [${scan.signals.join(', ')}]`)
-      recordMembraBlock(scan.score, scan.signals)
+      const blockClient = (req.headers['x-client-name'] ?? req.headers['user-agent'] ?? 'unknown').toString().split('/')[0]
+      recordMembraBlock(scan.score, scan.signals, scan.matches, blockClient)
       return res.status(403).json({
         error: {
           message: 'Request blocked by membra: prompt-injection risk score exceeded threshold',
           type: 'membra_blocked',
           score: scan.score,
           signals: scan.signals,
+          matches: scan.matches,
         },
       })
     }
   }
 
   const client = (req.headers['x-client-name'] ?? req.headers['user-agent'] ?? 'unknown').toString().split('/')[0]
+
+  // ── real content compression: dedupe/truncate large log-shaped messages ───
+  let compressedCount = 0
+  for (const m of messages as { role: string; content: string }[]) {
+    if (typeof m.content !== 'string') continue
+    const result = compressLogText(m.content)
+    if (result.applied) {
+      m.content = result.compressed
+      recordCompression(result.charsBefore, result.charsAfter)
+      compressedCount++
+    }
+  }
+  if (compressedCount > 0) res.set('X-Topi-Compressed-Messages', String(compressedCount))
+
   const tokensIn = estimateTokens(JSON.stringify(messages))
 
   const options = {

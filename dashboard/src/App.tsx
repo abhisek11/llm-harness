@@ -7,6 +7,14 @@ interface ProviderBreakdown {
   savedUsd: number;
 }
 
+interface CompressionStats {
+  messagesCompressed: number;
+  charsBefore: number;
+  charsAfter: number;
+  tokensBefore: number;
+  tokensAfter: number;
+}
+
 interface Bucket {
   requests: number;
   failedRequests: number;
@@ -17,9 +25,17 @@ interface Bucket {
   actualCostUsd: number;
   savedUsd: number;
   byProvider: Record<string, ProviderBreakdown>;
+  compression: CompressionStats;
   startedAt: string;
   lastActivityAt: string | null;
   savingsPercent: number;
+}
+
+interface SignalMatch {
+  name: string;
+  weight: number;
+  description: string;
+  matchedText: string;
 }
 
 interface SavingsEvent {
@@ -37,23 +53,42 @@ interface SavingsEvent {
   blockedByMembra: boolean;
   membraScore?: number;
   membraSignals?: string[];
+  membraMatches?: SignalMatch[];
+}
+
+interface Mechanism {
+  methods: string[];
+  baselineInputPer1M: number;
+  baselineOutputPer1M: number;
+  providerPricing: Record<string, { input: number; output: number }>;
+  tokenCountingMethod: string;
+  compressionMinChars: number;
+  compressionTechnique: string;
 }
 
 interface Metrics {
   lifetime: Bucket;
   session: Bucket;
   recentEvents: SavingsEvent[];
+  mechanism: Mechanism;
 }
+
+const EMPTY_COMPRESSION: CompressionStats = { messagesCompressed: 0, charsBefore: 0, charsAfter: 0, tokensBefore: 0, tokensAfter: 0 };
 
 const EMPTY_BUCKET: Bucket = {
   requests: 0, failedRequests: 0, blockedByMembra: 0, tokensIn: 0, tokensOut: 0,
-  baselineCostUsd: 0, actualCostUsd: 0, savedUsd: 0, byProvider: {},
+  baselineCostUsd: 0, actualCostUsd: 0, savedUsd: 0, byProvider: {}, compression: EMPTY_COMPRESSION,
   startedAt: '', lastActivityAt: null, savingsPercent: 0,
 };
 
-const EMPTY_METRICS: Metrics = { lifetime: EMPTY_BUCKET, session: EMPTY_BUCKET, recentEvents: [] };
+const EMPTY_MECHANISM: Mechanism = {
+  methods: [], baselineInputPer1M: 0, baselineOutputPer1M: 0, providerPricing: {},
+  tokenCountingMethod: '', compressionMinChars: 0, compressionTechnique: '',
+};
 
-const TABS = ['Session', 'Lifetime', 'Historical', 'Security'] as const;
+const EMPTY_METRICS: Metrics = { lifetime: EMPTY_BUCKET, session: EMPTY_BUCKET, recentEvents: [], mechanism: EMPTY_MECHANISM };
+
+const TABS = ['Session', 'Lifetime', 'Compression', 'Historical', 'Security'] as const;
 type Tab = typeof TABS[number];
 
 function fmtTok(n: number): string {
@@ -75,13 +110,18 @@ function Stat({ label, value, accent }: { label: string; value: string; accent?:
   );
 }
 
-function BucketView({ bucket, label }: { bucket: Bucket; label: string }) {
+function BucketView({ bucket, label, mechanism }: { bucket: Bucket; label: string; mechanism: Mechanism }) {
   const providers = Object.entries(bucket.byProvider).sort((a, b) => b[1].requests - a[1].requests);
   return (
     <div>
       <div className="mb-6 text-gray-500 text-xs">
         {label} {bucket.startedAt && <>· started {new Date(bucket.startedAt).toLocaleString()}</>}
         {bucket.lastActivityAt && <> · last activity {new Date(bucket.lastActivityAt).toLocaleTimeString()}</>}
+      </div>
+
+      <div className="bg-[#1c2620] border border-green-900/30 rounded-lg p-4 mb-6 text-xs text-gray-400 leading-relaxed">
+        <span className="text-green-500 font-bold">How "Saved" is calculated: </span>
+        baseline cost = tokens × ${mechanism.baselineInputPer1M}/1M in + ${mechanism.baselineOutputPer1M}/1M out (a typical paid frontier model, configurable via TOPI_BASELINE_INPUT_PER_1M/TOPI_BASELINE_OUTPUT_PER_1M) minus actual cost = what the provider that really served the request charges (real free-tier providers cost $0). This is <span className="text-white">cost avoidance via routing</span>, not token compression — see the Compression tab for actual token reduction.
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
@@ -238,29 +278,76 @@ function SecurityView({ events, lifetimeBlocked, sessionBlocked }: { events: Sav
       </div>
 
       <div className="bg-[#1c1c1c] border border-gray-800 rounded-lg p-6">
-        <h2 className="text-white font-bold mb-4">Blocked requests <span className="text-gray-500 font-normal text-xs">(most recent first)</span></h2>
+        <h2 className="text-white font-bold mb-4">Blocked requests — what &amp; why <span className="text-gray-500 font-normal text-xs">(most recent first)</span></h2>
         {blocked.length === 0 ? (
           <div className="text-gray-500 text-sm italic">Nothing blocked yet — try a message containing "ignore all previous instructions".</div>
         ) : (
-          <table className="w-full text-xs font-mono">
-            <thead>
-              <tr className="text-gray-500 uppercase tracking-widest border-b border-gray-800">
-                <th className="text-left pb-2">Time</th>
-                <th className="text-right pb-2">Score</th>
-                <th className="text-left pb-2">Signals</th>
-              </tr>
-            </thead>
-            <tbody>
-              {blocked.map((e, i) => (
-                <tr key={i} className="border-b border-gray-800/50">
-                  <td className="py-2 text-gray-500">{new Date(e.ts).toLocaleTimeString()}</td>
-                  <td className="py-2 text-right text-red-400">{e.membraScore?.toFixed(2)}</td>
-                  <td className="py-2 text-yellow-400">{(e.membraSignals ?? []).join(', ')}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="space-y-4">
+            {blocked.map((e, i) => (
+              <div key={i} className="border border-gray-800 rounded-lg p-4 bg-[#1a1a1a]">
+                <div className="flex justify-between items-center mb-3">
+                  <div className="flex items-center gap-3">
+                    <span className="text-gray-500 text-xs">{new Date(e.ts).toLocaleString()}</span>
+                    <span className="text-gray-500 text-xs">client: <span className="text-gray-300">{e.client}</span></span>
+                  </div>
+                  <span className="text-red-400 font-bold text-sm">risk score {e.membraScore?.toFixed(2)}</span>
+                </div>
+                <div className="space-y-2">
+                  {(e.membraMatches ?? []).map((m, j) => (
+                    <div key={j} className="flex flex-col gap-1 border-l-2 border-yellow-700/50 pl-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-yellow-400 font-bold text-xs uppercase tracking-widest">{m.name}</span>
+                        <span className="text-gray-500 text-xs">weight {m.weight}</span>
+                      </div>
+                      <div className="text-gray-400 text-xs">{m.description}</div>
+                      <div className="text-gray-300 text-xs bg-black/40 rounded px-2 py-1 inline-block w-fit">matched: "{m.matchedText}"</div>
+                    </div>
+                  ))}
+                  {(!e.membraMatches || e.membraMatches.length === 0) && (
+                    <div className="text-gray-500 text-xs italic">Signals: {(e.membraSignals ?? []).join(', ') || 'none recorded'}</div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function CompressionView({ session, lifetime, mechanism }: { session: CompressionStats; lifetime: CompressionStats; mechanism: Mechanism }) {
+  const pct = (c: CompressionStats) => (c.tokensBefore > 0 ? (1 - c.tokensAfter / c.tokensBefore) * 100 : 0);
+  return (
+    <div>
+      <div className="bg-[#1c2620] border border-green-900/30 rounded-lg p-4 mb-6 text-xs text-gray-400 leading-relaxed">
+        <span className="text-green-500 font-bold">Technique: </span>{mechanism.compressionTechnique}.
+        Only applied to messages ≥ {mechanism.compressionMinChars.toLocaleString()} chars that look log/stack-trace-shaped —
+        ordinary chat messages are never touched. This is <span className="text-white">real token reduction</span>, not routing —
+        the compressed text is what's actually sent to the provider.
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {[{ label: 'Session', c: session }, { label: 'Lifetime', c: lifetime }].map(({ label, c }) => (
+          <div key={label} className="bg-[#1c1c1c] border border-gray-800 rounded-lg p-6">
+            <h2 className="text-white font-bold mb-4">{label}</h2>
+            <div className="grid grid-cols-2 gap-y-4 mb-4">
+              <Stat label="Messages compressed" value={String(c.messagesCompressed)} accent="text-cyan-400" />
+              <Stat label="Reduction" value={`${pct(c).toFixed(1)}%`} accent="text-green-500" />
+            </div>
+            <div className="flex justify-between border-t border-gray-800 pt-3 mb-2 text-sm">
+              <span className="text-gray-400">Chars before → after</span>
+              <span className="text-white font-mono">{fmtTok(c.charsBefore)} → {fmtTok(c.charsAfter)}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-400">Tokens before → after</span>
+              <span className="text-white font-mono">{fmtTok(c.tokensBefore)} → {fmtTok(c.tokensAfter)}</span>
+            </div>
+            <div className="w-full h-2 rounded-full bg-gray-800 overflow-hidden mt-4">
+              <div className="h-full bg-green-500" style={{ width: `${Math.min(100, pct(c))}%` }} />
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -316,8 +403,11 @@ function App() {
         </div>
       </header>
 
-      {tab === 'Session' && <BucketView bucket={metrics.session} label="Current proxy process · runtime counters reset on restart" />}
-      {tab === 'Lifetime' && <BucketView bucket={metrics.lifetime} label="Cumulative across all sessions · persisted to ~/.topi/proxy_savings.json" />}
+      {tab === 'Session' && <BucketView bucket={metrics.session} label="Current proxy process · runtime counters reset on restart" mechanism={metrics.mechanism} />}
+      {tab === 'Lifetime' && <BucketView bucket={metrics.lifetime} label="Cumulative across all sessions · persisted to ~/.topi/proxy_savings.json" mechanism={metrics.mechanism} />}
+      {tab === 'Compression' && (
+        <CompressionView session={metrics.session.compression} lifetime={metrics.lifetime.compression} mechanism={metrics.mechanism} />
+      )}
       {tab === 'Historical' && <HistoricalView events={metrics.recentEvents} />}
       {tab === 'Security' && (
         <SecurityView

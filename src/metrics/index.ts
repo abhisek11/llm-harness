@@ -42,6 +42,15 @@ export interface SavingsEvent {
   blockedByMembra: boolean
   membraScore?: number
   membraSignals?: string[]
+  membraMatches?: { name: string; weight: number; description: string; matchedText: string }[]
+}
+
+interface CompressionStats {
+  messagesCompressed: number
+  charsBefore: number
+  charsAfter: number
+  tokensBefore: number
+  tokensAfter: number
 }
 
 interface Bucket {
@@ -54,6 +63,7 @@ interface Bucket {
   actualCostUsd: number
   savedUsd: number
   byProvider: Record<string, { requests: number; tokensIn: number; tokensOut: number; savedUsd: number }>
+  compression: CompressionStats
   startedAt: string
   lastActivityAt: string | null
 }
@@ -69,6 +79,7 @@ function emptyBucket(): Bucket {
     actualCostUsd: 0,
     savedUsd: 0,
     byProvider: {},
+    compression: { messagesCompressed: 0, charsBefore: 0, charsAfter: 0, tokensBefore: 0, tokensAfter: 0 },
     startedAt: new Date().toISOString(),
     lastActivityAt: null,
   }
@@ -131,13 +142,31 @@ function applyToBucket(b: Bucket, ev: SavingsEvent) {
   p.savedUsd += ev.savedUsd
 }
 
+export function recordCompression(charsBefore: number, charsAfter: number) {
+  const tokensBefore = estimateTokens('x'.repeat(charsBefore))
+  const tokensAfter = estimateTokens('x'.repeat(charsAfter))
+  for (const b of [lifetime, session]) {
+    b.compression.messagesCompressed += 1
+    b.compression.charsBefore += charsBefore
+    b.compression.charsAfter += charsAfter
+    b.compression.tokensBefore += tokensBefore
+    b.compression.tokensAfter += tokensAfter
+  }
+  persist()
+}
+
 export function estimateTokens(text: string): number {
   // Rough char/4 heuristic — no tokenizer dependency. Good enough for
   // relative cost tracking, not exact billing reconciliation.
   return Math.ceil((text || '').length / 4)
 }
 
-export function recordMembraBlock(score: number, signals: string[]) {
+export function recordMembraBlock(
+  score: number,
+  signals: string[],
+  matches: { name: string; weight: number; description: string; matchedText: string }[] = [],
+  client = 'unknown'
+) {
   lifetime.blockedByMembra += 1
   session.blockedByMembra += 1
   const ev: SavingsEvent = {
@@ -145,7 +174,7 @@ export function recordMembraBlock(score: number, signals: string[]) {
     ts: new Date().toISOString(),
     provider: 'none',
     model: 'blocked',
-    client: 'unknown',
+    client,
     tokensIn: 0,
     tokensOut: 0,
     baselineCostUsd: 0,
@@ -155,6 +184,7 @@ export function recordMembraBlock(score: number, signals: string[]) {
     blockedByMembra: true,
     membraScore: score,
     membraSignals: signals,
+    membraMatches: matches,
   }
   appendEvent(ev)
   persist()
@@ -202,5 +232,24 @@ export function getMetrics() {
     lifetime: { ...lifetime, savingsPercent: savingsPercent(lifetime) },
     session: { ...session, savingsPercent: savingsPercent(session) },
     recentEvents: recentEvents.slice(-50).reverse(),
+    mechanism: {
+      // Two independent, real mechanisms produce the numbers on this
+      // dashboard:
+      //  1. free-provider-routing: send the (possibly compressed) request
+      //     to a free/cheap provider instead of a paid one — $ saved, not
+      //     tokens saved. See `savedUsd` / `byProvider` on each bucket.
+      //  2. log-text-compression: large, log-shaped message content
+      //     (>= compressionMinChars, matches a log/stack-trace heuristic)
+      //     is deduped and truncated before it's ever sent to a provider —
+      //     real tokens removed. See `compression` on each bucket.
+      // Ordinary short conversational text is never touched by (2).
+      methods: ['free-provider-routing', 'log-text-compression'],
+      baselineInputPer1M: BASELINE_INPUT_PER_1M,
+      baselineOutputPer1M: BASELINE_OUTPUT_PER_1M,
+      providerPricing: PROVIDER_PRICING,
+      tokenCountingMethod: 'char_count / 4 (heuristic estimate, not a real tokenizer)',
+      compressionMinChars: 3000,
+      compressionTechnique: 'dedupe consecutive repeated lines, collapse long stack traces to head+tail frames, cap total lines to head+tail — original implementation inspired by headroom-ai\'s approach, not a port of it',
+    },
   }
 }
